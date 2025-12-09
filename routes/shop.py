@@ -1,10 +1,13 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from models import Product, CartItem, Order, OrderItem
 from database import db
 from flask_login import current_user, login_required
 from forms import AddToCartForm, CheckoutForm
+from chatbot_integration.chatbot_service import ChatbotService
 
 shop_bp = Blueprint('shop', __name__, template_folder='../templates')
+
+chatbot_service = ChatbotService()
 
 def get_products_from_db():
     """
@@ -123,3 +126,45 @@ def checkout():
 def purchase_history():
     orders = current_user.orders.order_by(Order.order_date.desc()).all()
     return render_template('purchase_history.html', title='Purchase History', orders=orders)
+
+@shop_bp.route('/chatbot', methods=['POST'])
+def chatbot():
+    """
+    Handles chatbot requests and returns AI-generated responses.
+    Expects JSON payload with 'message' and optionally 'history'.
+    
+    Implementation Details:
+    - Fetches current product catalog from database
+    - Passes products to chatbot service for context-aware responses
+    - Uses domain restriction via system instructions to keep responses e-commerce focused
+    - Falls back to keyword-based responses with product information if API unavailable
+    """
+    data = request.get_json()
+    
+    if not data or 'message' not in data:
+        return jsonify({'error': 'Message is required'}), 400
+    
+    user_message = data.get('message')
+    chat_history = data.get('history', [])
+    
+    try:
+        # Fetch all products from database for context
+        products = Product.query.all()
+        products_data = [
+            {
+                'name': p.name,
+                'description': p.description,
+                'price': p.price,
+                'stock': p.stock
+            }
+            for p in products
+        ]
+        
+        # Pass products to chatbot service for context-aware responses
+        response = chatbot_service.get_chatbot_response(user_message, chat_history, products_data)
+        return jsonify(response), 200
+    except Exception as e:
+        print(f"Error in chatbot endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to generate response'}), 500

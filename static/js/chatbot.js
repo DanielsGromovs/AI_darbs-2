@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendChatBtn = document.querySelector(".chat-input span");
 
     // 1. SOLIS: Izveidot mainīgo sarunas vēstures glabāšanai.
+    let chatHistory = [];
 
     const createChatLi = (message, className) => {
         const chatLi = document.createElement("li");
@@ -24,12 +25,28 @@ document.addEventListener('DOMContentLoaded', () => {
         // TODO: Sagatavot pieprasījuma opcijas (request options)
         // Izveidojiet JSON virknes objektu, kas satur gan pēdējo lietotāja ziņu, gan visu iepriekšējo sarunas vēsturi.
         const requestOptions = {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: chatHistory[chatHistory.length - 1]?.content || "",
+                history: chatHistory
+            })
         };
 
         // TODO: Izsaukt `fetch()` ar izveidotajām opcijām.
         // Pēc atbildes saņemšanas:
         // 1. Atjaunojiet `messageElement` saturu ar saņemto atbildi.
         // 2. Pievienojiet bota atbildi mainīgajā sarunas vēstures glabāšanai.
+        fetch(API_URL, requestOptions)
+            .then(res => res.json())
+            .then(data => {
+                messageElement.textContent = data.response || "Sorry, I couldn't process that.";
+                chatHistory.push({ role: "bot", content: data.response });
+            })
+            .catch(err => {
+                messageElement.textContent = "Error: Could not get response from server.";
+                console.error(err);
+            });
     }
 
     const handleChat = () => {
@@ -44,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 3. SOLIS: Pievienot lietotāja ziņu mainīgajā sarunas vēstures glabāšanai
         // TODO: Pievienojiet ziņu masīvam pareizajā formātā (kā objektu ar "role" un "content").
+        chatHistory.push({ role: "user", content: userMessage });
         
         setTimeout(() => {
             const incomingChatLi = createChatLi("Thinking...", "incoming");
