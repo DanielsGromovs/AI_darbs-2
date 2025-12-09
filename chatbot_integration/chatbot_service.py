@@ -17,13 +17,13 @@ class ChatbotService:
         api_key = os.getenv("HUGGINGFACE_API_KEY")
 
         # TODO: 2. SOLIS - OpenAI klienta inicializācija izmantojot "katanemo/Arch-Router-1.5B" modeli
-        # Saglabājam klienta inicializāciju (ja nākotnē vēlēsies ārēju modeli),
-        # taču pašlaik atbildes tiek ģenerētas lokāli, lai izvairītos no 410 kļūdām.
+        # Izmantojam Hugging Face router (OpenAI-compatible) endpointu; kļūmes gadījumā būs lokāls fallback.
+        self.model_id = "katanemo/Arch-Router-1.5B"
         try:
             http_client = httpx.Client(timeout=60.0)
             self.client = OpenAI(
                 api_key=api_key,
-                base_url="https://api-inference.huggingface.co/openai/",
+                base_url="https://router.huggingface.co/v1/",
                 http_client=http_client
             )
         except Exception as e:
@@ -46,7 +46,7 @@ class ChatbotService:
         )
 
     def get_chatbot_response(self, user_message, chat_history=None, products=None):
-        """Return a natural, shop-aware response without external API calls."""
+        """Return a shop-aware response. Uses HF router when available, else local fallback."""
         if chat_history is None:
             chat_history = []
 
@@ -56,7 +56,6 @@ class ChatbotService:
 
         # Build helpful snippets from catalog
         catalog_text = self._format_product_catalog(products)
-        product_names = [p.get("name", "") for p in products]
 
         # Quick helpers
         def list_some_products(limit=4):
@@ -84,7 +83,7 @@ class ChatbotService:
                     return p
             return None
 
-        # Off-topic guardrail
+        # Off-topic guardrail (before API to avoid waste)
         off_topic_words = ["weather", "sport", "politic", "movie", "music", "game", "news"]
         if any(w in user_lower for w in off_topic_words):
             return {
@@ -94,6 +93,27 @@ class ChatbotService:
                 )
             }
 
+        # Prepare OpenAI-style messages with catalog context
+        system_content = self.system_instruction + "\n\n" + catalog_text
+        messages = [{"role": "system", "content": system_content}]
+        messages.extend(chat_history)
+        messages.append({"role": "user", "content": user_message})
+
+        # Try Hugging Face router (OpenAI-compatible); fallback to local intents on failure
+        if self.client:
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_id,
+                    messages=messages,
+                    max_tokens=320,
+                    temperature=0.6
+                )
+                if response.choices and len(response.choices) > 0:
+                    return {"response": response.choices[0].message.content}
+            except Exception as e:
+                print(f"HF router call failed, using local fallback: {e}")
+
+        # Local intent-based fallback
         # Intent handling
         if any(greet in user_lower for greet in ["hi", "hello", "hey", "greetings"]):
             return {
